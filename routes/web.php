@@ -3,6 +3,49 @@
 use App\Http\Controllers\Auth\RegistrationRequestController;
 use Illuminate\Support\Facades\Route;
 
+Route::get('/build/{path}', function (string $path) {
+    $buildRoot = realpath(public_path('build'));
+    $assetPath = realpath(public_path('build/'.$path));
+
+    abort_unless(
+        $buildRoot !== false
+            && $assetPath !== false
+            && str_starts_with($assetPath, $buildRoot.DIRECTORY_SEPARATOR)
+            && is_file($assetPath),
+        404
+    );
+
+    $extension = strtolower(pathinfo($assetPath, PATHINFO_EXTENSION));
+    $contentType = match ($extension) {
+        'js', 'mjs' => 'application/javascript; charset=UTF-8',
+        'css' => 'text/css; charset=UTF-8',
+        'json' => 'application/json; charset=UTF-8',
+        'svg' => 'image/svg+xml',
+        'png' => 'image/png',
+        'jpg', 'jpeg' => 'image/jpeg',
+        'ico' => 'image/x-icon',
+        'txt' => 'text/plain; charset=UTF-8',
+        default => mime_content_type($assetPath) ?: 'application/octet-stream',
+    };
+
+    return response()->file($assetPath, [
+        'Content-Type' => $contentType,
+        'Cache-Control' => 'public, max-age=31536000, immutable',
+    ]);
+})->where('path', '.*');
+
+foreach ([
+    'favicon.ico' => 'image/x-icon',
+    'favicon.svg' => 'image/svg+xml',
+    'apple-touch-icon.png' => 'image/png',
+    'robots.txt' => 'text/plain; charset=UTF-8',
+] as $publicAsset => $contentType) {
+    Route::get('/'.$publicAsset, fn () => response()->file(public_path($publicAsset), [
+        'Content-Type' => $contentType,
+        'Cache-Control' => 'public, max-age=31536000, immutable',
+    ]));
+}
+
 Route::middleware('guest')->group(function () {
     Route::get('/register', [RegistrationRequestController::class, 'create'])->name('register');
     Route::post('/register', [RegistrationRequestController::class, 'store'])->name('register.store');
