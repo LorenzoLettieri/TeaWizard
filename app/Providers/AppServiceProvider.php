@@ -6,6 +6,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 
@@ -37,6 +38,10 @@ class AppServiceProvider extends ServiceProvider
 
     protected function configureDefaults(): void
     {
+        if (env('VERCEL')) {
+            URL::forceScheme('https');
+        }
+
         Date::use(CarbonImmutable::class);
 
         DB::prohibitDestructiveCommands(
