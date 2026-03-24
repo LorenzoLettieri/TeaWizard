@@ -64,6 +64,7 @@
             "@php artisan test"
         ],
         "vercel": [
+            "@php artisan package:discover --ansi",
             "npm ci",
             "npm run build"
         ],
