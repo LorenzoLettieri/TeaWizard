@@ -33,23 +33,23 @@
       "headers": {
         "Cache-Control": "public, max-age=31536000, immutable"
       },
-      "dest": "/public/build/$1"
+      "dest": "/build/$1"
     },
     {
       "src": "/favicon.ico",
-      "dest": "/public/favicon.ico"
+      "dest": "/favicon.ico"
     },
     {
       "src": "/favicon.svg",
-      "dest": "/public/favicon.svg"
+      "dest": "/favicon.svg"
     },
     {
       "src": "/apple-touch-icon.png",
-      "dest": "/public/apple-touch-icon.png"
+      "dest": "/apple-touch-icon.png"
     },
     {
       "src": "/robots.txt",
-      "dest": "/public/robots.txt"
+      "dest": "/robots.txt"
     },
     {
       "src": "/(.*)",
