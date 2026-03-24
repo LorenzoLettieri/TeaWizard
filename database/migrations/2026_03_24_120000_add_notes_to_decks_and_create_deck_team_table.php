@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('decks', function (Blueprint $table) {
-            $table->text('notes')->nullable()->after('link');
+            $table->text('notes')->nullable();
         });
 
         Schema::create('deck_team', function (Blueprint $table) {
