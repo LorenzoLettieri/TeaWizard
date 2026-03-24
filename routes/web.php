@@ -3,6 +3,27 @@
 use App\Http\Controllers\Auth\RegistrationRequestController;
 use Illuminate\Support\Facades\Route;
 
+Route::get('/build/{path}', function (string $path) {
+    $buildRoot = realpath(public_path('build'));
+    $assetPath = realpath(public_path('build/'.$path));
+
+    abort_unless(
+        $buildRoot !== false
+            && $assetPath !== false
+            && str_starts_with($assetPath, $buildRoot.DIRECTORY_SEPARATOR)
+            && is_file($assetPath),
+        404
+    );
+
+    return response()->file($assetPath, [
+        'Cache-Control' => 'public, max-age=31536000, immutable',
+    ]);
+})->where('path', '.*');
+
+foreach (['favicon.ico', 'favicon.svg', 'apple-touch-icon.png', 'robots.txt'] as $publicAsset) {
+    Route::get('/'.$publicAsset, fn () => response()->file(public_path($publicAsset)));
+}
+
 Route::middleware('guest')->group(function () {
     Route::get('/register', [RegistrationRequestController::class, 'create'])->name('register');
     Route::post('/register', [RegistrationRequestController::class, 'store'])->name('register.store');
