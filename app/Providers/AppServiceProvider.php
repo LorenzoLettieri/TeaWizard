@@ -18,13 +18,37 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         if (env('VERCEL')) {
-            $compiledViewsPath = sys_get_temp_dir().DIRECTORY_SEPARATOR.'teawizard-views';
+            $runtimeRoot = sys_get_temp_dir().DIRECTORY_SEPARATOR.'teawizard';
+            $compiledViewsPath = $runtimeRoot.DIRECTORY_SEPARATOR.'views';
+            $sessionPath = $runtimeRoot.DIRECTORY_SEPARATOR.'sessions';
+            $cachePath = $runtimeRoot.DIRECTORY_SEPARATOR.'cache';
+            $privateDiskRoot = $runtimeRoot.DIRECTORY_SEPARATOR.'storage'.DIRECTORY_SEPARATOR.'app'.DIRECTORY_SEPARATOR.'private';
+            $publicDiskRoot = $runtimeRoot.DIRECTORY_SEPARATOR.'storage'.DIRECTORY_SEPARATOR.'app'.DIRECTORY_SEPARATOR.'public';
 
-            if (! is_dir($compiledViewsPath)) {
-                @mkdir($compiledViewsPath, 0777, true);
+            foreach ([$runtimeRoot, $compiledViewsPath, $sessionPath, $cachePath, $privateDiskRoot, $publicDiskRoot] as $path) {
+                if (! is_dir($path)) {
+                    @mkdir($path, 0777, true);
+                }
             }
 
             Config::set('view.compiled', $compiledViewsPath);
+            Config::set('session.files', $sessionPath);
+            Config::set('cache.stores.file.path', $cachePath);
+            Config::set('cache.stores.file.lock_path', $cachePath);
+            Config::set('filesystems.disks.local.root', $privateDiskRoot);
+            Config::set('filesystems.disks.public.root', $publicDiskRoot);
+
+            if (! env('SESSION_DRIVER')) {
+                Config::set('session.driver', 'cookie');
+            }
+
+            if (! env('CACHE_STORE')) {
+                Config::set('cache.default', 'array');
+            }
+
+            if (! env('LOG_CHANNEL')) {
+                Config::set('logging.default', 'stderr');
+            }
         }
     }
 
