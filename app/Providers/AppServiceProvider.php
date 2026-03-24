@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\ServiceProvider;
@@ -15,7 +16,15 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        if (env('VERCEL')) {
+            $compiledViewsPath = sys_get_temp_dir().DIRECTORY_SEPARATOR.'teawizard-views';
+
+            if (! is_dir($compiledViewsPath)) {
+                @mkdir($compiledViewsPath, 0777, true);
+            }
+
+            Config::set('view.compiled', $compiledViewsPath);
+        }
     }
 
     /**
