@@ -64,7 +64,9 @@
             "@php artisan test"
         ],
         "vercel": [
-            "@php artisan package:discover --ansi"
+            "@php artisan package:discover --ansi",
+            "npm ci",
+            "npm run build"
         ],
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",

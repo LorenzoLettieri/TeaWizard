@@ -3,11 +3,24 @@
   "framework": null,
   "builds": [
     {
-      "src": "package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "public"
-      }
+      "src": "public/build/**",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "public/favicon.ico",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "public/favicon.svg",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "public/apple-touch-icon.png",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "public/robots.txt",
+      "use": "@vercel/static"
     },
     {
       "src": "api/index.php",
@@ -16,7 +29,27 @@
   ],
   "routes": [
     {
-      "handle": "filesystem"
+      "src": "/build/(.*)",
+      "headers": {
+        "Cache-Control": "public, max-age=31536000, immutable"
+      },
+      "dest": "/build/$1"
+    },
+    {
+      "src": "/favicon.ico",
+      "dest": "/favicon.ico"
+    },
+    {
+      "src": "/favicon.svg",
+      "dest": "/favicon.svg"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "dest": "/apple-touch-icon.png"
+    },
+    {
+      "src": "/robots.txt",
+      "dest": "/robots.txt"
     },
     {
       "src": "/(.*)",
