@@ -15,27 +15,63 @@ new class extends Component {
     public $teamStandings;
     public $sharedDecks;
     public $teams;
-    public $pendingRequests;
+    public int $pendingRequests = 0;
     public array $quickActions = [];
+    public bool $secondaryReady = false;
 
     public function mount(): void
     {
-        $this->loadDashboard();
+        $this->recentResults = collect();
+        $this->teamStandings = collect();
+        $this->sharedDecks = collect();
+        $this->teams = collect();
+        $this->setQuickActions();
+        $this->loadOverview();
     }
 
-    protected function loadDashboard(): void
+    protected function setQuickActions(): void
     {
         $user = auth()->user();
-        $teamIds = $user->teams()->pluck('teams.id');
-        $teamUserIds = DB::table('team_user')
-            ->whereIn('team_id', $teamIds)
-            ->distinct()
-            ->pluck('user_id')
+
+        $this->quickActions = array_values(array_filter([
+            ['label' => 'Log Results', 'href' => route('results.index'), 'description' => 'Record testing sessions and outcomes.'],
+            ['label' => 'Manage Decks', 'href' => route('decks.index'), 'description' => 'Update deck notes and team sharing.'],
+            ['label' => 'Open Stats', 'href' => route('stats.index'), 'description' => 'Inspect matchup data and meta trends.'],
+            ['label' => 'Browse Teams', 'href' => route('teams.index'), 'description' => 'Create teams or join existing groups.'],
+            $user->hasRole(Roles::ADMIN) ? ['label' => 'Review Access', 'href' => route('admin.registration-requests'), 'description' => 'Process pending account requests.'] : null,
+        ]));
+    }
+
+    protected function currentTeamIds(User $user): array
+    {
+        return $user->teams()
+            ->pluck('teams.id')
             ->map(fn ($id) => (int) $id)
             ->all();
+    }
 
-        $personalQuery = Result::query()
-            ->where('user_id', $user->id);
+    protected function accessibleUserIds(array $teamIds, int $userId): array
+    {
+        return collect(
+            DB::table('team_user')
+                ->whereIn('team_id', $teamIds)
+                ->distinct()
+                ->pluck('user_id')
+                ->all()
+        )
+            ->push($userId)
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    protected function loadOverview(): void
+    {
+        $user = auth()->user();
+        $teamIds = $this->currentTeamIds($user);
+
+        $personalQuery = Result::query()->where('user_id', $user->id);
 
         $lastTenResults = (clone $personalQuery)
             ->latest('date')
@@ -53,7 +89,7 @@ new class extends Component {
             ->withCount('results')
             ->orderByDesc('results_count')
             ->orderBy('name')
-            ->first();
+            ->first(['id', 'user_id', 'name', 'archetype_id']);
 
         $focusMatchup = (clone $personalQuery)
             ->selectRaw("
@@ -66,64 +102,6 @@ new class extends Component {
             ->orderByRaw("SUM(CASE WHEN match_result = 'win' THEN 1 ELSE 0 END) / COUNT(*) asc")
             ->orderByDesc('total')
             ->first();
-
-        $recentResults = Result::query()
-            ->with(['user:id,name', 'deck:id,name,archetype_id', 'deck.archetype:id,name'])
-            ->whereIn('user_id', $teamUserIds)
-            ->latest('date')
-            ->latest('id')
-            ->limit(8)
-            ->get();
-
-        $standingRows = Result::query()
-            ->whereIn('user_id', $teamUserIds)
-            ->selectRaw("
-                user_id,
-                COUNT(*) as total,
-                SUM(CASE WHEN match_result = 'win' THEN 1 ELSE 0 END) as wins
-            ")
-            ->groupBy('user_id')
-            ->orderByDesc('wins')
-            ->orderByDesc('total')
-            ->limit(6)
-            ->get()
-            ->keyBy('user_id');
-
-        $teamStandings = User::query()
-            ->whereIn('id', $standingRows->keys())
-            ->orderBy('name')
-            ->get(['id', 'name'])
-            ->map(function ($member) use ($standingRows) {
-                $row = $standingRows[$member->id];
-                $total = max((int) $row->total, 1);
-
-                return [
-                    'name' => $member->name,
-                    'initials' => $member->initials(),
-                    'total' => (int) $row->total,
-                    'wins' => (int) $row->wins,
-                    'winrate' => ((int) $row->wins / $total) * 100,
-                ];
-            })
-            ->sortByDesc('winrate')
-            ->values();
-
-        $sharedDecks = Team::query()
-            ->whereIn('teams.id', $teamIds)
-            ->with([
-                'decks' => fn ($query) => $query
-                    ->with(['user:id,name', 'archetype:id,name'])
-                    ->latest('deck_team.created_at')
-                    ->limit(3),
-            ])
-            ->orderBy('name')
-            ->get(['teams.id', 'teams.name']);
-
-        $teams = Team::query()
-            ->whereIn('id', $teamIds)
-            ->withCount('users')
-            ->orderBy('name')
-            ->get(['id', 'name', 'description']);
 
         $sharedDeckCount = Deck::query()
             ->where('user_id', $user->id)
@@ -145,21 +123,75 @@ new class extends Component {
             ] : null,
         ];
 
-        $this->recentResults = $recentResults;
-        $this->teamStandings = $teamStandings;
-        $this->sharedDecks = $sharedDecks;
-        $this->teams = $teams;
         $this->pendingRequests = $user->hasRole(Roles::ADMIN)
             ? RegistrationRequest::query()->where('status', RegistrationRequest::STATUS_PENDING)->count()
             : 0;
+    }
 
-        $this->quickActions = array_values(array_filter([
-            ['label' => 'Log Results', 'href' => route('results.index'), 'description' => 'Record testing sessions and outcomes.'],
-            ['label' => 'Manage Decks', 'href' => route('decks.index'), 'description' => 'Update deck notes and team sharing.'],
-            ['label' => 'Open Stats', 'href' => route('stats.index'), 'description' => 'Inspect matchup data and meta trends.'],
-            ['label' => 'Browse Teams', 'href' => route('teams.index'), 'description' => 'Create teams or join existing groups.'],
-            $user->hasRole(Roles::ADMIN) ? ['label' => 'Review Access', 'href' => route('admin.registration-requests'), 'description' => 'Process pending account requests.'] : null,
-        ]));
+    public function loadSecondaryData(): void
+    {
+        if ($this->secondaryReady) {
+            return;
+        }
+
+        $user = auth()->user();
+        $teamIds = $this->currentTeamIds($user);
+        $teamUserIds = $this->accessibleUserIds($teamIds, $user->id);
+
+        $this->recentResults = Result::query()
+            ->with(['user:id,name', 'deck:id,name,archetype_id', 'deck.archetype:id,name'])
+            ->whereIn('user_id', $teamUserIds)
+            ->latest('date')
+            ->latest('id')
+            ->limit(8)
+            ->get(['id', 'user_id', 'deck_id', 'date', 'opponent_deck', 'match_result']);
+
+        $this->teamStandings = Result::query()
+            ->join('users', 'users.id', '=', 'results.user_id')
+            ->whereIn('results.user_id', $teamUserIds)
+            ->selectRaw("
+                users.id,
+                users.name,
+                COUNT(*) as total,
+                SUM(CASE WHEN results.match_result = 'win' THEN 1 ELSE 0 END) as wins
+            ")
+            ->groupBy('users.id', 'users.name')
+            ->orderByDesc('wins')
+            ->orderByDesc('total')
+            ->limit(6)
+            ->get()
+            ->map(function ($standing) {
+                $total = max((int) $standing->total, 1);
+
+                return [
+                    'name' => $standing->name,
+                    'initials' => User::make(['name' => $standing->name])->initials(),
+                    'total' => (int) $standing->total,
+                    'wins' => (int) $standing->wins,
+                    'winrate' => ((int) $standing->wins / $total) * 100,
+                ];
+            })
+            ->sortByDesc('winrate')
+            ->values();
+
+        $this->sharedDecks = Team::query()
+            ->whereIn('teams.id', $teamIds)
+            ->with([
+                'decks' => fn ($query) => $query
+                    ->with(['user:id,name', 'archetype:id,name'])
+                    ->latest('deck_team.created_at')
+                    ->limit(3),
+            ])
+            ->orderBy('name')
+            ->get(['teams.id', 'teams.name']);
+
+        $this->teams = Team::query()
+            ->whereIn('id', $teamIds)
+            ->withCount('users')
+            ->orderBy('name')
+            ->get(['id', 'name', 'description']);
+
+        $this->secondaryReady = true;
     }
 }; ?>
 
@@ -220,83 +252,104 @@ new class extends Component {
             </div>
         </div>
 
-        <div class="grid grid-cols-1 xl:grid-cols-3 gap-8">
+        <div wire:init="loadSecondaryData" class="grid grid-cols-1 xl:grid-cols-3 gap-8">
             <div class="xl:col-span-2 space-y-8">
-                <section class="rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 overflow-hidden">
-                    <div class="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-                        <div>
-                            <h2 class="text-lg font-bold dark:text-white">Recent Testing Activity</h2>
-                            <p class="text-sm text-zinc-500">Latest logs from you and your teams.</p>
-                        </div>
-                        <flux:button variant="ghost" size="sm" href="{{ route('results.index') }}">View all logs</flux:button>
-                    </div>
-
-                    <table class="w-full text-left">
-                        <thead class="bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-700">
-                            <tr>
-                                <th class="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">When</th>
-                                <th class="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">Player</th>
-                                <th class="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">Deck</th>
-                                <th class="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">Matchup</th>
-                                <th class="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500 text-right">Result</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-zinc-200 dark:divide-zinc-700">
-                            @forelse ($recentResults as $result)
-                                <tr class="hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
-                                    <td class="px-6 py-4 text-sm text-zinc-500 whitespace-nowrap">{{ $result->date->diffForHumans() }}</td>
-                                    <td class="px-6 py-4 text-sm font-medium text-zinc-900 dark:text-white">{{ $result->user->name }}</td>
-                                    <td class="px-6 py-4 text-sm text-zinc-600 dark:text-zinc-400">
-                                        {{ $result->deck->name }}
-                                        @if ($result->deck->archetype)
-                                            <span class="text-zinc-400">· {{ $result->deck->archetype->name }}</span>
-                                        @endif
-                                    </td>
-                                    <td class="px-6 py-4 text-sm text-zinc-600 dark:text-zinc-400">{{ $result->opponent_deck }}</td>
-                                    <td class="px-6 py-4 text-right">
-                                        <flux:badge :color="$result->match_result === 'win' ? 'success' : ($result->match_result === 'loss' ? 'danger' : 'warning')" size="sm">
-                                            {{ ucfirst($result->match_result) }}
-                                        </flux:badge>
-                                    </td>
-                                </tr>
-                            @empty
-                                <tr>
-                                    <td colspan="5" class="px-6 py-10 text-center text-sm text-zinc-500">No testing activity yet.</td>
-                                </tr>
-                            @endforelse
-                        </tbody>
-                    </table>
-                </section>
-
-                <section class="rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 overflow-hidden">
-                    <div class="border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-                        <h2 class="text-lg font-bold dark:text-white">Team Standings</h2>
-                        <p class="text-sm text-zinc-500">Current winrate ranking inside your shared team scope.</p>
-                    </div>
-
-                    <div class="divide-y divide-zinc-200 dark:divide-zinc-800">
-                        @forelse ($teamStandings as $standing)
-                            <div class="flex items-center justify-between px-6 py-4">
-                                <div class="flex items-center gap-3">
-                                    <div class="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-100 text-sm font-bold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
-                                        {{ $standing['initials'] }}
-                                    </div>
-                                    <div>
-                                        <p class="font-medium text-zinc-900 dark:text-white">{{ $standing['name'] }}</p>
-                                        <p class="text-sm text-zinc-500">{{ $standing['wins'] }} wins across {{ $standing['total'] }} matches</p>
-                                    </div>
-                                </div>
-                                <div class="text-right">
-                                    <p class="text-lg font-bold {{ $standing['winrate'] >= 50 ? 'text-emerald-600' : 'text-rose-600' }}">
-                                        {{ number_format($standing['winrate'], 1) }}%
-                                    </p>
-                                </div>
+                @if ($secondaryReady)
+                    <section class="rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 overflow-hidden">
+                        <div class="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
+                            <div>
+                                <h2 class="text-lg font-bold dark:text-white">Recent Testing Activity</h2>
+                                <p class="text-sm text-zinc-500">Latest logs from you and your teams.</p>
                             </div>
-                        @empty
-                            <div class="px-6 py-10 text-center text-sm text-zinc-500">No standings yet. Add results to rank your group.</div>
-                        @endforelse
-                    </div>
-                </section>
+                            <flux:button variant="ghost" size="sm" href="{{ route('results.index') }}">View all logs</flux:button>
+                        </div>
+
+                        <table class="w-full text-left">
+                            <thead class="bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-700">
+                                <tr>
+                                    <th class="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">When</th>
+                                    <th class="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">Player</th>
+                                    <th class="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">Deck</th>
+                                    <th class="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">Matchup</th>
+                                    <th class="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500 text-right">Result</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-zinc-200 dark:divide-zinc-700">
+                                @forelse ($recentResults as $result)
+                                    <tr class="hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
+                                        <td class="px-6 py-4 text-sm text-zinc-500 whitespace-nowrap">{{ $result->date->diffForHumans() }}</td>
+                                        <td class="px-6 py-4 text-sm font-medium text-zinc-900 dark:text-white">{{ $result->user->name }}</td>
+                                        <td class="px-6 py-4 text-sm text-zinc-600 dark:text-zinc-400">
+                                            {{ $result->deck->name }}
+                                            @if ($result->deck->archetype)
+                                                <span class="text-zinc-400">&middot; {{ $result->deck->archetype->name }}</span>
+                                            @endif
+                                        </td>
+                                        <td class="px-6 py-4 text-sm text-zinc-600 dark:text-zinc-400">{{ $result->opponent_deck }}</td>
+                                        <td class="px-6 py-4 text-right">
+                                            <flux:badge :color="$result->match_result === 'win' ? 'success' : ($result->match_result === 'loss' ? 'danger' : 'warning')" size="sm">
+                                                {{ ucfirst($result->match_result) }}
+                                            </flux:badge>
+                                        </td>
+                                    </tr>
+                                @empty
+                                    <tr>
+                                        <td colspan="5" class="px-6 py-10 text-center text-sm text-zinc-500">No testing activity yet.</td>
+                                    </tr>
+                                @endforelse
+                            </tbody>
+                        </table>
+                    </section>
+
+                    <section class="rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 overflow-hidden">
+                        <div class="border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
+                            <h2 class="text-lg font-bold dark:text-white">Team Standings</h2>
+                            <p class="text-sm text-zinc-500">Current winrate ranking inside your shared team scope.</p>
+                        </div>
+
+                        <div class="divide-y divide-zinc-200 dark:divide-zinc-800">
+                            @forelse ($teamStandings as $standing)
+                                <div class="flex items-center justify-between px-6 py-4">
+                                    <div class="flex items-center gap-3">
+                                        <div class="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-100 text-sm font-bold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                                            {{ $standing['initials'] }}
+                                        </div>
+                                        <div>
+                                            <p class="font-medium text-zinc-900 dark:text-white">{{ $standing['name'] }}</p>
+                                            <p class="text-sm text-zinc-500">{{ $standing['wins'] }} wins across {{ $standing['total'] }} matches</p>
+                                        </div>
+                                    </div>
+                                    <div class="text-right">
+                                        <p class="text-lg font-bold {{ $standing['winrate'] >= 50 ? 'text-emerald-600' : 'text-rose-600' }}">
+                                            {{ number_format($standing['winrate'], 1) }}%
+                                        </p>
+                                    </div>
+                                </div>
+                            @empty
+                                <div class="px-6 py-10 text-center text-sm text-zinc-500">No standings yet. Add results to rank your group.</div>
+                            @endforelse
+                        </div>
+                    </section>
+                @else
+                    <section class="rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 overflow-hidden">
+                        <div class="border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
+                            <div class="h-6 w-56 animate-pulse rounded bg-zinc-200 dark:bg-zinc-700"></div>
+                            <div class="mt-2 h-4 w-72 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800"></div>
+                        </div>
+                        <div class="space-y-3 p-6">
+                            @foreach (range(1, 5) as $placeholder)
+                                <div class="h-14 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800"></div>
+                            @endforeach
+                        </div>
+                    </section>
+
+                    <section class="rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 overflow-hidden p-6 space-y-3">
+                        <div class="h-6 w-40 animate-pulse rounded bg-zinc-200 dark:bg-zinc-700"></div>
+                        @foreach (range(1, 4) as $placeholder)
+                            <div class="h-16 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800"></div>
+                        @endforeach
+                    </section>
+                @endif
             </div>
 
             <div class="space-y-8">
@@ -323,55 +376,71 @@ new class extends Component {
                     </section>
                 @endif
 
-                <section class="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-                    <h2 class="text-lg font-bold dark:text-white">Your Teams</h2>
-                    <div class="mt-5 space-y-4">
-                        @forelse ($teams as $team)
-                            <div class="rounded-xl bg-zinc-50 px-4 py-3 dark:bg-zinc-800/60">
-                                <div class="flex items-center justify-between gap-4">
-                                    <div>
-                                        <p class="font-medium text-zinc-900 dark:text-white">{{ $team->name }}</p>
-                                        <p class="text-sm text-zinc-500">{{ $team->users_count }} members</p>
+                @if ($secondaryReady)
+                    <section class="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+                        <h2 class="text-lg font-bold dark:text-white">Your Teams</h2>
+                        <div class="mt-5 space-y-4">
+                            @forelse ($teams as $team)
+                                <div class="rounded-xl bg-zinc-50 px-4 py-3 dark:bg-zinc-800/60">
+                                    <div class="flex items-center justify-between gap-4">
+                                        <div>
+                                            <p class="font-medium text-zinc-900 dark:text-white">{{ $team->name }}</p>
+                                            <p class="text-sm text-zinc-500">{{ $team->users_count }} members</p>
+                                        </div>
+                                        <flux:button variant="ghost" size="sm" href="{{ route('teams.index') }}">Open</flux:button>
                                     </div>
-                                    <flux:button variant="ghost" size="sm" href="{{ route('teams.index') }}">Open</flux:button>
                                 </div>
-                            </div>
-                        @empty
-                            <p class="text-sm text-zinc-500">You are not in any team yet.</p>
-                        @endforelse
-                    </div>
-                </section>
+                            @empty
+                                <p class="text-sm text-zinc-500">You are not in any team yet.</p>
+                            @endforelse
+                        </div>
+                    </section>
 
-                <section class="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-                    <h2 class="text-lg font-bold dark:text-white">Shared Decks Snapshot</h2>
-                    <div class="mt-5 space-y-5">
-                        @forelse ($sharedDecks as $team)
-                            @if ($team->decks->isNotEmpty())
-                                <div>
-                                    <div class="mb-3 flex items-center justify-between">
-                                        <p class="font-medium text-zinc-900 dark:text-white">{{ $team->name }}</p>
-                                        <span class="text-xs uppercase tracking-[0.16em] text-zinc-400">{{ $team->decks->count() }} shown</span>
+                    <section class="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+                        <h2 class="text-lg font-bold dark:text-white">Shared Decks Snapshot</h2>
+                        <div class="mt-5 space-y-5">
+                            @forelse ($sharedDecks as $team)
+                                @if ($team->decks->isNotEmpty())
+                                    <div>
+                                        <div class="mb-3 flex items-center justify-between">
+                                            <p class="font-medium text-zinc-900 dark:text-white">{{ $team->name }}</p>
+                                            <span class="text-xs uppercase tracking-[0.16em] text-zinc-400">{{ $team->decks->count() }} shown</span>
+                                        </div>
+                                        <div class="space-y-2">
+                                            @foreach ($team->decks as $deck)
+                                                <div class="rounded-xl bg-zinc-50 px-4 py-3 dark:bg-zinc-800/60">
+                                                    <p class="font-medium text-zinc-900 dark:text-white">{{ $deck->name }}</p>
+                                                    <p class="mt-1 text-sm text-zinc-500">
+                                                        {{ $deck->user->name }}
+                                                        @if ($deck->archetype)
+                                                            &middot; {{ $deck->archetype->name }}
+                                                        @endif
+                                                    </p>
+                                                </div>
+                                            @endforeach
+                                        </div>
                                     </div>
-                                    <div class="space-y-2">
-                                        @foreach ($team->decks as $deck)
-                                            <div class="rounded-xl bg-zinc-50 px-4 py-3 dark:bg-zinc-800/60">
-                                                <p class="font-medium text-zinc-900 dark:text-white">{{ $deck->name }}</p>
-                                                <p class="mt-1 text-sm text-zinc-500">
-                                                    {{ $deck->user->name }}
-                                                    @if ($deck->archetype)
-                                                        · {{ $deck->archetype->name }}
-                                                    @endif
-                                                </p>
-                                            </div>
-                                        @endforeach
-                                    </div>
-                                </div>
-                            @endif
-                        @empty
-                            <p class="text-sm text-zinc-500">No shared decks visible yet.</p>
-                        @endforelse
-                    </div>
-                </section>
+                                @endif
+                            @empty
+                                <p class="text-sm text-zinc-500">No shared decks visible yet.</p>
+                            @endforelse
+                        </div>
+                    </section>
+                @else
+                    <section class="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 space-y-3">
+                        <div class="h-6 w-28 animate-pulse rounded bg-zinc-200 dark:bg-zinc-700"></div>
+                        @foreach (range(1, 3) as $placeholder)
+                            <div class="h-16 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800"></div>
+                        @endforeach
+                    </section>
+
+                    <section class="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 space-y-3">
+                        <div class="h-6 w-44 animate-pulse rounded bg-zinc-200 dark:bg-zinc-700"></div>
+                        @foreach (range(1, 2) as $placeholder)
+                            <div class="h-20 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800"></div>
+                        @endforeach
+                    </section>
+                @endif
             </div>
         </div>
     </flux:main>

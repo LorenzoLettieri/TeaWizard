@@ -8,6 +8,7 @@ use Livewire\Attributes\Validate;
 use Livewire\Component;
 
 new class extends Component {
+    public bool $ready = false;
     public $teams;
     public $allUsers;
     public array $currentUserTeamIds = [];
@@ -23,8 +24,19 @@ new class extends Component {
 
     public function mount(): void
     {
+        $this->teams = collect();
+        $this->allUsers = collect();
+    }
+
+    public function bootPage(): void
+    {
+        if ($this->ready) {
+            return;
+        }
+
         $this->loadTeams();
         $this->refreshCurrentUserTeams();
+        $this->ready = true;
     }
 
     protected function isAdmin(): bool
@@ -46,7 +58,7 @@ new class extends Component {
         $this->teams = Team::query()
             ->withCount('users')
             ->orderBy('name')
-            ->get();
+            ->get(['id', 'name', 'description']);
     }
 
     public function save(): void
@@ -69,6 +81,8 @@ new class extends Component {
 
         $this->reset(['name', 'description', 'editingTeam']);
         $this->loadTeams();
+        $this->refreshCurrentUserTeams();
+        $this->ready = true;
         $this->modal('team-modal')->close();
     }
 
@@ -165,68 +179,72 @@ new class extends Component {
 
         <flux:separator class="my-6" />
 
-        <div
-            class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-hidden shadow-sm">
-            <table class="w-full text-left">
-                <thead class="bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-700">
-                    <tr>
-                        <th class="px-6 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Name</th>
-                        <th class="px-6 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Description</th>
-                        <th class="px-6 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Members</th>
-                        <th class="px-6 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Your Status</th>
-                        <th class="px-6 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider text-right"></th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-zinc-200 dark:divide-zinc-700">
-                    @foreach ($teams as $team)
-                        @php
-                            $isMember = in_array($team->id, $currentUserTeamIds, true);
-                        @endphp
+        <div wire:init="bootPage">
+            @if ($ready)
+                <div class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-hidden shadow-sm">
+                    <table class="w-full text-left">
+                        <thead class="bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-700">
+                            <tr>
+                                <th class="px-6 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Name</th>
+                                <th class="px-6 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Description</th>
+                                <th class="px-6 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Members</th>
+                                <th class="px-6 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Your Status</th>
+                                <th class="px-6 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider text-right"></th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-zinc-200 dark:divide-zinc-700">
+                            @foreach ($teams as $team)
+                                @php
+                                    $isMember = in_array($team->id, $currentUserTeamIds, true);
+                                @endphp
 
-                        <tr class="hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
-                            <td class="px-6 py-4 text-sm font-medium text-zinc-800 dark:text-white">{{ $team->name }}</td>
-                            <td class="px-6 py-4 text-sm text-zinc-600 dark:text-zinc-400">{{ $team->description }}</td>
-                            <td class="px-6 py-4 text-sm">
-                                <span
-                                    class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200">
-                                    {{ $team->users_count }} users
-                                </span>
-                            </td>
-                            <td class="px-6 py-4 text-sm">
-                                @if ($isMember)
-                                    <flux:badge color="success" size="sm">Joined</flux:badge>
-                                @else
-                                    <flux:badge color="zinc" size="sm">Not joined</flux:badge>
-                                @endif
-                            </td>
-                            <td class="px-6 py-4 text-sm text-right">
-                                <div class="flex items-center justify-end gap-2">
-                                    @if ($isMember)
-                                        <flux:button variant="ghost" size="sm" wire:click="leaveTeam({{ $team->id }})">Leave</flux:button>
-                                    @else
-                                        <flux:button variant="primary" size="sm" wire:click="joinTeam({{ $team->id }})">Join</flux:button>
-                                    @endif
-
-                                    <flux:dropdown>
-                                        <flux:button variant="ghost" icon="ellipsis-horizontal" size="sm"></flux:button>
-                                        <flux:menu>
-                                            @if (auth()->user()?->hasRole(Roles::ADMIN))
-                                                <flux:menu.item wire:click="manageMembers({{ $team->id }})" icon="user-plus">
-                                                    Manage Members
-                                                </flux:menu.item>
+                                <tr class="hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
+                                    <td class="px-6 py-4 text-sm font-medium text-zinc-800 dark:text-white">{{ $team->name }}</td>
+                                    <td class="px-6 py-4 text-sm text-zinc-600 dark:text-zinc-400">{{ $team->description }}</td>
+                                    <td class="px-6 py-4 text-sm">
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200">
+                                            {{ $team->users_count }} users
+                                        </span>
+                                    </td>
+                                    <td class="px-6 py-4 text-sm">
+                                        @if ($isMember)
+                                            <flux:badge color="success" size="sm">Joined</flux:badge>
+                                        @else
+                                            <flux:badge color="zinc" size="sm">Not joined</flux:badge>
+                                        @endif
+                                    </td>
+                                    <td class="px-6 py-4 text-sm text-right">
+                                        <div class="flex items-center justify-end gap-2">
+                                            @if ($isMember)
+                                                <flux:button variant="ghost" size="sm" wire:click="leaveTeam({{ $team->id }})">Leave</flux:button>
+                                            @else
+                                                <flux:button variant="primary" size="sm" wire:click="joinTeam({{ $team->id }})">Join</flux:button>
                                             @endif
-                                            <flux:menu.item wire:click="edit({{ $team->id }})" icon="pencil-square">Edit</flux:menu.item>
-                                            <flux:menu.item wire:click="delete({{ $team->id }})" icon="trash" variant="danger">
-                                                Delete
-                                            </flux:menu.item>
-                                        </flux:menu>
-                                    </flux:dropdown>
-                                </div>
-                            </td>
-                        </tr>
+
+                                            <flux:dropdown>
+                                                <flux:button variant="ghost" icon="ellipsis-horizontal" size="sm"></flux:button>
+                                                <flux:menu>
+                                                    @if (auth()->user()?->hasRole(Roles::ADMIN))
+                                                        <flux:menu.item wire:click="manageMembers({{ $team->id }})" icon="user-plus">Manage Members</flux:menu.item>
+                                                    @endif
+                                                    <flux:menu.item wire:click="edit({{ $team->id }})" icon="pencil-square">Edit</flux:menu.item>
+                                                    <flux:menu.item wire:click="delete({{ $team->id }})" icon="trash" variant="danger">Delete</flux:menu.item>
+                                                </flux:menu>
+                                            </flux:dropdown>
+                                        </div>
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            @else
+                <div class="space-y-3 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+                    @foreach (range(1, 6) as $placeholder)
+                        <div class="h-14 animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-800"></div>
                     @endforeach
-                </tbody>
-            </table>
+                </div>
+            @endif
         </div>
 
         <flux:modal name="team-modal" class="md:w-[30rem]">
@@ -264,14 +282,12 @@ new class extends Component {
                                 @foreach ($managingTeam->users as $member)
                                     <div class="flex items-center justify-between p-2 bg-zinc-50 dark:bg-zinc-800 rounded-lg">
                                         <div class="flex items-center gap-3">
-                                            <span
-                                                class="w-8 h-8 flex items-center justify-center rounded-full bg-zinc-200 dark:bg-zinc-700 text-xs font-bold text-zinc-600 dark:text-zinc-300">
+                                            <span class="w-8 h-8 flex items-center justify-center rounded-full bg-zinc-200 dark:bg-zinc-700 text-xs font-bold text-zinc-600 dark:text-zinc-300">
                                                 {{ $member->initials() }}
                                             </span>
                                             <span class="text-sm dark:text-zinc-300">{{ $member->name }}</span>
                                         </div>
-                                        <flux:button variant="ghost" icon="x-mark" size="xs"
-                                            wire:click="detachUser({{ $member->id }})" />
+                                        <flux:button variant="ghost" icon="x-mark" size="xs" wire:click="detachUser({{ $member->id }})" />
                                     </div>
                                 @endforeach
                             @else
@@ -286,12 +302,10 @@ new class extends Component {
                         <h3 class="text-sm font-semibold text-zinc-700 dark:text-zinc-300">Add Members</h3>
                         <div class="space-y-2 max-h-60 overflow-y-auto pr-2">
                             @foreach ($allUsers ?? [] as $user)
-                                @if (!$managingTeam || !$managingTeam->users->contains($user->id))
-                                    <div
-                                        class="flex items-center justify-between p-2 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-lg transition-colors group">
+                                @if (! $managingTeam || ! $managingTeam->users->contains($user->id))
+                                    <div class="flex items-center justify-between p-2 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-lg transition-colors group">
                                         <div class="flex items-center gap-3">
-                                            <span
-                                                class="w-8 h-8 flex items-center justify-center rounded-full bg-zinc-200 dark:bg-zinc-700 text-xs font-bold text-zinc-600 dark:text-zinc-300">
+                                            <span class="w-8 h-8 flex items-center justify-center rounded-full bg-zinc-200 dark:bg-zinc-700 text-xs font-bold text-zinc-600 dark:text-zinc-300">
                                                 {{ $user->initials() }}
                                             </span>
                                             <span class="text-sm dark:text-zinc-300">{{ $user->name }}</span>

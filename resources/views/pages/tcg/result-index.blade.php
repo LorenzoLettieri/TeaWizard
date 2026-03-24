@@ -12,6 +12,7 @@ use Livewire\WithPagination;
 new class extends Component {
     use WithPagination;
 
+    public bool $ready = false;
     public $filterUser = '';
     public $filterDeck = '';
     public $filterOpponent = '';
@@ -63,7 +64,18 @@ new class extends Component {
     public function mount(): void
     {
         $this->date = now()->format('Y-m-d');
+        $this->teamMembers = collect();
+        $this->decks = collect();
+    }
+
+    public function bootPage(): void
+    {
+        if ($this->ready) {
+            return;
+        }
+
         $this->loadSupportData();
+        $this->ready = true;
     }
 
     public function updated($propertyName): void
@@ -98,13 +110,34 @@ new class extends Component {
 
     public function getResultsProperty()
     {
+        if (! $this->ready) {
+            return Result::query()->whereRaw('1 = 0')->paginate(15);
+        }
+
         return Result::query()
-            ->with(['user', 'deck.archetype'])
+            ->with(['user:id,name', 'deck:id,name,archetype_id', 'deck.archetype:id,name'])
             ->whereIn('user_id', $this->accessibleUserIds)
             ->when($this->filterUser, fn ($query) => $query->where('user_id', $this->filterUser))
             ->when($this->filterDeck, fn ($query) => $query->where('deck_id', $this->filterDeck))
             ->when($this->filterOpponent, fn ($query) => $query->where('opponent_deck', 'like', '%' . $this->filterOpponent . '%'))
             ->orderBy($this->sortField, $this->sortDirection)
+            ->select([
+                'id',
+                'user_id',
+                'deck_id',
+                'date',
+                'platform',
+                'opponent_deck',
+                'dice_result',
+                'game_1_result',
+                'game_2_result',
+                'game_3_result',
+                'match_result',
+                'notes',
+                'variance',
+                'gameplan',
+                'sideboard_notes',
+            ])
             ->paginate(15);
     }
 
@@ -189,34 +222,36 @@ new class extends Component {
             </flux:modal.trigger>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-            <flux:select wire:model.live="filterUser" label="Member">
-                <flux:select.option value="">All Team Members</flux:select.option>
-                @foreach ($teamMembers as $member)
-                    <flux:select.option value="{{ $member->id }}">{{ $member->name }}</flux:select.option>
-                @endforeach
-            </flux:select>
+        <div wire:init="bootPage">
+            @if ($ready)
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+                    <flux:select wire:model.live="filterUser" label="Member">
+                        <flux:select.option value="">All Team Members</flux:select.option>
+                        @foreach ($teamMembers as $member)
+                            <flux:select.option value="{{ $member->id }}">{{ $member->name }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
 
-            <flux:select wire:model.live="filterDeck" label="My Deck">
-                <flux:select.option value="">All Your Decks</flux:select.option>
-                @foreach ($decks as $deck)
-                    <flux:select.option value="{{ $deck->id }}">{{ $deck->name }}</flux:select.option>
-                @endforeach
-            </flux:select>
+                    <flux:select wire:model.live="filterDeck" label="My Deck">
+                        <flux:select.option value="">All Your Decks</flux:select.option>
+                        @foreach ($decks as $deck)
+                            <flux:select.option value="{{ $deck->id }}">{{ $deck->name }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
 
-            <flux:input wire:model.live.debounce.300ms="filterOpponent" label="Opponent Deck" icon="magnifying-glass"
-                placeholder="Search opponent..." />
+                    <flux:input wire:model.live.debounce.300ms="filterOpponent" label="Opponent Deck" icon="magnifying-glass"
+                        placeholder="Search opponent..." />
 
-            <div class="flex items-end">
-                <flux:button variant="ghost" class="w-full"
-                    wire:click="$set('filterUser', ''); $set('filterDeck', ''); $set('filterOpponent', '');">Clear
-                    Filters</flux:button>
-            </div>
-        </div>
+                    <div class="flex items-end">
+                        <flux:button variant="ghost" class="w-full"
+                            wire:click="$set('filterUser', ''); $set('filterDeck', ''); $set('filterOpponent', '');">Clear
+                            Filters</flux:button>
+                    </div>
+                </div>
 
-        <div
-            class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-x-auto shadow-sm">
-            <table class="w-full text-left border-collapse min-w-[1600px]">
+                <div
+                    class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-x-auto shadow-sm">
+                    <table class="w-full text-left border-collapse min-w-[1600px]">
                 <thead class="bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-700">
                     <tr>
                         <th class="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer"
@@ -411,14 +446,28 @@ new class extends Component {
                         </tr>
                     @endforelse
                 </tbody>
-            </table>
-        </div>
+                    </table>
+                </div>
 
-        @if ($this->results->hasPages())
-            <div class="mt-4">
-                {{ $this->results->links() }}
-            </div>
-        @endif
+                @if ($this->results->hasPages())
+                    <div class="mt-4">
+                        {{ $this->results->links() }}
+                    </div>
+                @endif
+            @else
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+                    @foreach (range(1, 4) as $placeholder)
+                        <div class="h-20 animate-pulse rounded-xl border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"></div>
+                    @endforeach
+                </div>
+
+                <div class="space-y-3 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+                    @foreach (range(1, 8) as $placeholder)
+                        <div class="h-14 animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-800"></div>
+                    @endforeach
+                </div>
+            @endif
+        </div>
 
         <flux:modal name="result-modal" class="md:w-[48rem]">
             <form wire:submit="save" class="space-y-6">
