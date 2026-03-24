@@ -15,13 +15,35 @@ Route::get('/build/{path}', function (string $path) {
         404
     );
 
+    $extension = strtolower(pathinfo($assetPath, PATHINFO_EXTENSION));
+    $contentType = match ($extension) {
+        'js', 'mjs' => 'application/javascript; charset=UTF-8',
+        'css' => 'text/css; charset=UTF-8',
+        'json' => 'application/json; charset=UTF-8',
+        'svg' => 'image/svg+xml',
+        'png' => 'image/png',
+        'jpg', 'jpeg' => 'image/jpeg',
+        'ico' => 'image/x-icon',
+        'txt' => 'text/plain; charset=UTF-8',
+        default => mime_content_type($assetPath) ?: 'application/octet-stream',
+    };
+
     return response()->file($assetPath, [
+        'Content-Type' => $contentType,
         'Cache-Control' => 'public, max-age=31536000, immutable',
     ]);
 })->where('path', '.*');
 
-foreach (['favicon.ico', 'favicon.svg', 'apple-touch-icon.png', 'robots.txt'] as $publicAsset) {
-    Route::get('/'.$publicAsset, fn () => response()->file(public_path($publicAsset)));
+foreach ([
+    'favicon.ico' => 'image/x-icon',
+    'favicon.svg' => 'image/svg+xml',
+    'apple-touch-icon.png' => 'image/png',
+    'robots.txt' => 'text/plain; charset=UTF-8',
+] as $publicAsset => $contentType) {
+    Route::get('/'.$publicAsset, fn () => response()->file(public_path($publicAsset), [
+        'Content-Type' => $contentType,
+        'Cache-Control' => 'public, max-age=31536000, immutable',
+    ]));
 }
 
 Route::middleware('guest')->group(function () {
