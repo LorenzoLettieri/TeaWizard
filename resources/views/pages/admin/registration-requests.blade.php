@@ -6,7 +6,6 @@ use App\Support\Roles;
 use Flux\Flux;
 use Livewire\Component;
 use Spatie\Permission\Models\Role;
-use Throwable;
 
 new class extends Component {
     public $pendingRequests;
@@ -67,7 +66,7 @@ new class extends Component {
                 'reviewed_at' => now(),
                 'reviewed_by' => auth()->id(),
             ]);
-        } catch (Throwable $exception) {
+        } catch (\Throwable $exception) {
             report($exception);
             Flux::toast('Approval failed. Check application logs for details.');
 
