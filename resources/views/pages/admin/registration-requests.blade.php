@@ -4,9 +4,9 @@ use App\Models\RegistrationRequest;
 use App\Models\User;
 use App\Support\Roles;
 use Flux\Flux;
-use Illuminate\Support\Facades\DB;
 use Livewire\Component;
 use Spatie\Permission\Models\Role;
+use Throwable;
 
 new class extends Component {
     public $pendingRequests;
@@ -42,23 +42,37 @@ new class extends Component {
             return;
         }
 
-        DB::transaction(function () use ($request): void {
-            Role::findOrCreate(Roles::USER, 'web');
+        $role = Role::query()
+            ->where('name', Roles::USER)
+            ->where('guard_name', 'web')
+            ->first();
 
+        if (! $role) {
+            Flux::toast('The user role is missing. Seed roles before approving requests.');
+
+            return;
+        }
+
+        try {
             $user = User::create([
                 'name' => $request->name,
                 'email' => $request->email,
                 'password' => $request->password,
             ]);
 
-            $user->syncRoles([Roles::USER]);
+            $user->roles()->syncWithoutDetaching([$role->getKey()]);
 
             $request->update([
                 'status' => RegistrationRequest::STATUS_APPROVED,
                 'reviewed_at' => now(),
                 'reviewed_by' => auth()->id(),
             ]);
-        });
+        } catch (Throwable $exception) {
+            report($exception);
+            Flux::toast('Approval failed. Check application logs for details.');
+
+            return;
+        }
 
         $this->loadRequests();
         Flux::toast('Registration request approved.');
