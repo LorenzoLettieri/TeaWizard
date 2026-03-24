@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
+use Livewire\Compiler\CacheManager as LivewireCacheManager;
+use Livewire\Compiler\Compiler as LivewireCompiler;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -49,6 +51,16 @@ class AppServiceProvider extends ServiceProvider
             if (! env('LOG_CHANNEL')) {
                 Config::set('logging.default', 'stderr');
             }
+
+            $livewireCachePath = $runtimeRoot.DIRECTORY_SEPARATOR.'livewire';
+
+            if (! is_dir($livewireCachePath)) {
+                @mkdir($livewireCachePath, 0777, true);
+            }
+
+            $this->app->singleton('livewire.compiler', fn () => new LivewireCompiler(
+                new LivewireCacheManager($livewireCachePath)
+            ));
         }
     }
 
